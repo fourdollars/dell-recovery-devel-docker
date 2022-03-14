@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.3-labs
 FROM ubuntu:jammy
 RUN <<EOF
 sed -i 's/# deb-src/deb-src/' /etc/apt/sources.list
