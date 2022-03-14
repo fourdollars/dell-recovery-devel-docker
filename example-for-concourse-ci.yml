@@ -1,0 +1,89 @@
+resource_types:
+- name: webdav
+  type: registry-image
+  tags: [internal]
+  source:
+    repository: ghcr.io/fourdollars/webdav-resource
+
+resources:
+# WebDAV
+- name: webdav
+  type: webdav
+  icon: nas
+  tags: [internal]
+  check_every: 1h
+  source:
+    domain: webdav
+    ssl: false
+    port: 80
+    username: webdav
+    password: webdav
+    path: dell-recovery
+
+# Docker
+- name: jammy
+  type: registry-image
+  tags: [internal]
+  source:
+    repository: ghcr.io/fourdollars/dell-recovery-devel-docker
+
+# GitHub
+- name: dell-recovery
+  type: git
+  icon: github
+  tags: [internal]
+  source:
+    uri: https://github.com/fourdollars/dell-recovery.git
+    branch: master
+
+jobs:
+- name: dell-recovery
+  serial_groups:
+    - dell-recovery
+  plan:
+  - get: dell-recovery
+    tags: [internal]
+    trigger: true
+    params:
+      depth: 1
+  - get: jammy
+    tags: [internal]
+  - task: build
+    tags: [internal]
+    image: jammy
+    config:
+      inputs:
+      - name: dell-recovery
+        path: source
+      outputs:
+      - name: output
+      params:
+        DEBIAN_FRONTEND: noninteractive
+        TERM: xterm
+      platform: linux
+      run:
+        path: bash
+        args:
+        - -exc
+        - |
+          #sed -i 's/archive.ubuntu.com/mirror01.idc.hinet.net/' /etc/apt/sources.list
+          apt-get update
+          apt-get full-upgrade --yes
+          apt-get install --yes devscripts equivs
+          mk-build-deps source/debian/control
+          dpkg -i *.deb || apt-get install -f --yes
+          rm -f *.deb
+          source="$(dpkg-parsechangelog --show-field Source -l source/debian/changelog)"
+          version="$(dpkg-parsechangelog --show-field Version -l source/debian/changelog)"
+          cp -r source "$source" # Avoid "Invalid cross-device link"
+          cd "$source"
+          sha=$(git rev-parse --short HEAD)
+          git log -1
+          sed -i "s/$version/$version+$sha/" debian/changelog
+          dpkg-buildpackage -us -uc -tc
+          cd ..
+          mv *"$version"*.deb output
+  - put: webdav
+    tags: [internal]
+    params:
+      from: output
